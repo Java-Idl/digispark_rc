@@ -1,3 +1,4 @@
+import base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import unquote, urlparse
 from rich.console import Console
@@ -15,25 +16,43 @@ class PartyTrickHandler(BaseHTTPRequestHandler):
         public_ip = self.headers.get('X-Public-IP', 'Unknown')
         local_ip = self.client_address[0]
 
-        # Read raw bytes (exactly as sent)
+        # Read the raw POST body (as string, since we sent a string)
         content_length = int(self.headers.get('Content-Length', 0))
-        raw_data = self.rfile.read(content_length)
+        raw_body = self.rfile.read(content_length).decode('utf-8')
 
-        # Save raw bytes to a file (binary mode)
-        filename = f"recieved_{sender_host}.txt"
-        with open(filename, "wb") as f:
-            f.write(raw_data)
-
-        # Try to decode as text for preview
+        # Attempt to decode as Base64; if it fails, treat as plain text
         try:
-            preview_text = raw_data.decode('utf-8')
-            preview = preview_text[:200] + ("..." if len(preview_text) > 200 else "")
-            status_text = f"[bold green]Saved {len(raw_data)} bytes to {filename}[/bold green]"
-        except UnicodeDecodeError:
-            preview = f"<Binary data: {len(raw_data)} bytes>"
-            status_text = f"[bold green]Saved {len(raw_data)} bytes (binary) to {filename}[/bold green]"
+            # The body should be a Base64 string. Decode it to raw bytes.
+            file_bytes = base64.b64decode(raw_body)
+            is_base64 = True
+        except Exception:
+            # Not valid Base64 – treat as plain text (e.g., "Not found")
+            file_bytes = raw_body.encode('utf-8')
+            is_base64 = False
 
-        # Build Rich display
+        # Determine filename extension
+        if is_base64 and file_bytes.startswith(b'ssh-'):
+            ext = '.pub'
+        elif is_base64:
+            ext = '.bin'
+        else:
+            ext = '.txt'
+
+        filename = f"received_{sender_host}{ext}"
+        with open(filename, 'wb') as f:
+            f.write(file_bytes)
+
+        # Prepare preview
+        try:
+            # If it's a text file, show a preview
+            preview_text = file_bytes.decode('utf-8')
+            preview = preview_text[:200] + ("..." if len(preview_text) > 200 else "")
+            status_text = f"[bold green]Saved {len(file_bytes)} bytes to {filename}[/bold green]"
+        except UnicodeDecodeError:
+            preview = f"<Binary data: {len(file_bytes)} bytes>"
+            status_text = f"[bold green]Saved {len(file_bytes)} bytes (binary) to {filename}[/bold green]"
+
+        # Rich display
         content = Table.grid(padding=(0, 2))
         content.add_column(justify="left", style="bold cyan")
         content.add_column(justify="left")
@@ -48,6 +67,9 @@ class PartyTrickHandler(BaseHTTPRequestHandler):
         panel = Panel(content, title="[bold yellow]File Received[/bold yellow]",
                       expand=False, padding=(1, 5))
         console.print(panel)
+
+        # Debug print
+        print(f"DEBUG: Received {len(file_bytes)} bytes from {sender_host} -> {filename}")
 
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
