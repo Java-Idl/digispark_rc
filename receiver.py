@@ -1,4 +1,4 @@
-import base64
+import hashlib
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import unquote, urlparse
 from rich.console import Console
@@ -15,42 +15,36 @@ class PartyTrickHandler(BaseHTTPRequestHandler):
         msg = self.headers.get('X-Message', 'No message')
         public_ip = self.headers.get('X-Public-IP', 'Unknown')
         local_ip = self.client_address[0]
+        sent_hash = self.headers.get('X-File-Hash', '')
 
-        # Read the raw POST body (as string, since we sent a string)
+        # Read raw bytes
         content_length = int(self.headers.get('Content-Length', 0))
-        raw_body = self.rfile.read(content_length).decode('utf-8')
+        raw_data = self.rfile.read(content_length)
+        print(f"DEBUG: Received {len(raw_data)} bytes")
+        print(f"DEBUG: First 100 bytes: {raw_data[:100]}")
 
-        # Attempt to decode as Base64; if it fails, treat as plain text
-        try:
-            # The body should be a Base64 string. Decode it to raw bytes.
-            file_bytes = base64.b64decode(raw_body)
-            is_base64 = True
-        except Exception:
-            # Not valid Base64 – treat as plain text (e.g., "Not found")
-            file_bytes = raw_body.encode('utf-8')
-            is_base64 = False
+        # Compute hash of received data
+        received_hash = hashlib.sha256(raw_data).hexdigest()
+        print(f"DEBUG: Received hash: {received_hash}")
 
-        # Determine filename extension
-        if is_base64 and file_bytes.startswith(b'ssh-'):
-            ext = '.pub'
-        elif is_base64:
-            ext = '.bin'
-        else:
-            ext = '.txt'
-
-        filename = f"received_{sender_host}{ext}"
+        # Save raw bytes to file
+        filename = f"received_{sender_host}.pub"
         with open(filename, 'wb') as f:
-            f.write(file_bytes)
+            f.write(raw_data)
 
-        # Prepare preview
+        # Verify hash if provided
+        if sent_hash and sent_hash != received_hash:
+            print(f"WARNING: Hash mismatch! Expected {sent_hash}, got {received_hash}")
+            status_text = f"[bold red]Hash mismatch! Data may be corrupted.[/bold red]"
+        else:
+            status_text = f"[bold green]Saved {len(raw_data)} bytes to {filename}[/bold green]"
+
+        # Preview (try to decode as text)
         try:
-            # If it's a text file, show a preview
-            preview_text = file_bytes.decode('utf-8')
+            preview_text = raw_data.decode('utf-8')
             preview = preview_text[:200] + ("..." if len(preview_text) > 200 else "")
-            status_text = f"[bold green]Saved {len(file_bytes)} bytes to {filename}[/bold green]"
         except UnicodeDecodeError:
-            preview = f"<Binary data: {len(file_bytes)} bytes>"
-            status_text = f"[bold green]Saved {len(file_bytes)} bytes (binary) to {filename}[/bold green]"
+            preview = f"<Binary data: {len(raw_data)} bytes>"
 
         # Rich display
         content = Table.grid(padding=(0, 2))
@@ -67,9 +61,6 @@ class PartyTrickHandler(BaseHTTPRequestHandler):
         panel = Panel(content, title="[bold yellow]File Received[/bold yellow]",
                       expand=False, padding=(1, 5))
         console.print(panel)
-
-        # Debug print
-        print(f"DEBUG: Received {len(file_bytes)} bytes from {sender_host} -> {filename}")
 
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
