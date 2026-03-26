@@ -1,3 +1,6 @@
+import hashlib
+import zipfile
+import io
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import unquote, urlparse
 from rich.console import Console
@@ -14,26 +17,71 @@ class PartyTrickHandler(BaseHTTPRequestHandler):
         msg = self.headers.get('X-Message', 'No message')
         public_ip = self.headers.get('X-Public-IP', 'Unknown')
         local_ip = self.client_address[0]
+        sent_hash = self.headers.get('X-File-Hash', '')
 
-        # Read raw bytes (exactly as sent)
+        # Read raw bytes
         content_length = int(self.headers.get('Content-Length', 0))
         raw_data = self.rfile.read(content_length)
+        print(f"DEBUG: Received {len(raw_data)} bytes")
 
-        # Save raw bytes to a file (binary mode)
-        filename = f"recieved_{sender_host}.txt"
-        with open(filename, "wb") as f:
-            f.write(raw_data)
+        # Try to interpret as zip
+        is_zip = False
+        original_filename = None
+        extracted_bytes = None
 
-        # Try to decode as text for preview
+        # First, check if the data is a zip file (magic bytes PK)
+        if len(raw_data) >= 4 and raw_data[:4] == b'PK\x03\x04':
+            print("DEBUG: Data appears to be a ZIP archive")
+            try:
+                with zipfile.ZipFile(io.BytesIO(raw_data)) as zf:
+                    # Get the first file in the archive (should be the pub key)
+                    file_list = zf.namelist()
+                    if file_list:
+                        original_filename = file_list[0]
+                        with zf.open(original_filename) as f:
+                            extracted_bytes = f.read()
+                        print(f"DEBUG: Extracted {len(extracted_bytes)} bytes from {original_filename}")
+                        is_zip = True
+            except Exception as e:
+                print(f"DEBUG: Failed to extract zip: {e}")
+
+        if is_zip and extracted_bytes is not None:
+            # Use extracted bytes as the actual file content
+            file_bytes = extracted_bytes
+            # Determine extension from original filename or default .pub
+            if original_filename:
+                ext = original_filename.split('.')[-1] if '.' in original_filename else 'pub'
+                filename = f"received_{sender_host}_{original_filename}"
+            else:
+                filename = f"received_{sender_host}.pub"
+        else:
+            # Not a valid zip, treat as raw (maybe "Not found" text)
+            file_bytes = raw_data
+            filename = f"received_{sender_host}.txt"
+
+        # Compute hash of the final file_bytes
+        received_hash = hashlib.sha256(file_bytes).hexdigest()
+        print(f"DEBUG: Received hash: {received_hash}")
+
+        # Save the file
+        with open(filename, 'wb') as f:
+            f.write(file_bytes)
+
+        # Verify hash if provided
+        if sent_hash and sent_hash != "none" and sent_hash != received_hash:
+            print(f"WARNING: Hash mismatch! Expected {sent_hash}, got {received_hash}")
+            status_text = f"[bold red]Hash mismatch! Data may be corrupted.[/bold red]"
+        else:
+            status_text = f"[bold green]Saved {len(file_bytes)} bytes to {filename}[/bold green]"
+
+        # Preview (try to decode as text)
         try:
-            preview_text = raw_data.decode('utf-8')
+            preview_text = file_bytes.decode('utf-8')
             preview = preview_text[:200] + ("..." if len(preview_text) > 200 else "")
-            status_text = f"[bold green]Saved {len(raw_data)} bytes to {filename}[/bold green]"
         except UnicodeDecodeError:
-            preview = f"<Binary data: {len(raw_data)} bytes>"
-            status_text = f"[bold green]Saved {len(raw_data)} bytes (binary) to {filename}[/bold green]"
+            preview = f"<Binary data: {len(file_bytes)} bytes>"
 
-        # Build Rich display
+        # Rich display
         content = Table.grid(padding=(0, 2))
         content.add_column(justify="left", style="bold cyan")
         content.add_column(justify="left")
