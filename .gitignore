@@ -1,0 +1,31 @@
+# Python cache and environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Logs and temp output
+*.log
+error.txt
+msg.txt
+
+# Build artifacts and binaries
+*.exe
+*.dll
+*.obj
+
+# Archives
+*.zip
+
+# Extracted/exfiltrated folders and sensitive key files
+extracted_*/
+*.pem
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+known_hosts
+known_hosts.old
+
+# Sync/system metadata
+.stfolder/
